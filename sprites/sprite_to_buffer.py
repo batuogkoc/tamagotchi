@@ -28,9 +28,9 @@ if __name__ == "__main__":
 
 	sprite_name = to_snake_case(input_path.stem)
 	with open(input_path.with_suffix(".h"), "w") as f:
-		f.write(f"#define {sprite_name.upper()}_ROWS = {out_rows}\n")
-		f.write(f"#define {sprite_name.upper()}_COLS = {out_cols}\n")
-		f.write("static const unsigned char PROGMEM "+sprite_name+"[] = {\n")
+		f.write(f"#define {sprite_name.upper()}_ROWS {out_rows}\n")
+		f.write(f"#define {sprite_name.upper()}_COLS {out_cols}\n")
+		f.write("static const unsigned char PROGMEM "+sprite_name+"_buf[] = {\n")
 		for row in range(out_rows):
 			f.write("\t")
 			for col in range(out_cols):

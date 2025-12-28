@@ -1,6 +1,6 @@
-#define SMILEY_ROWS = 32
-#define SMILEY_COLS = 32
-static const unsigned char PROGMEM smiley[] = {
+#define SMILEY_ROWS 32
+#define SMILEY_COLS 32
+static const unsigned char PROGMEM smiley_buf[] = {
 	0b00000000, 0b00000000, 0b00000000, 0b00000000,
 	0b00000000, 0b00000000, 0b00000000, 0b00000000,
 	0b00000000, 0b00000000, 0b00000000, 0b00000000,
