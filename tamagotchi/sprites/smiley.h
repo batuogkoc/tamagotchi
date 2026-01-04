@@ -1,5 +1,5 @@
-#define SMILEY_ROWS 32
-#define SMILEY_COLS 32
+#import "sprite.h"
+ 
 static const unsigned char PROGMEM smiley_happy_buf[] = {
 	0b00000000, 0b00000000, 0b00000000, 0b00000000,
 	0b00000000, 0b00000000, 0b00000000, 0b00000000,
@@ -33,6 +33,12 @@ static const unsigned char PROGMEM smiley_happy_buf[] = {
 	0b00000000, 0b00000000, 0b00000000, 0b00000000,
 	0b00000000, 0b00000000, 0b00000000, 0b00000000,
 	0b00000000, 0b00000000, 0b00000000, 0b00000000 };
+
+static struct Sprite smiley_happy = {
+	.h = 32,
+	.w = 32,
+	.buf = smiley_happy_buf
+};
 
 static const unsigned char PROGMEM smiley_neutral_buf[] = {
 	0b00000000, 0b00000000, 0b00000000, 0b00000000,
@@ -68,6 +74,12 @@ static const unsigned char PROGMEM smiley_neutral_buf[] = {
 	0b00000000, 0b00000000, 0b00000000, 0b00000000,
 	0b00000000, 0b00000000, 0b00000000, 0b00000000 };
 
+static struct Sprite smiley_neutral = {
+	.h = 32,
+	.w = 32,
+	.buf = smiley_neutral_buf
+};
+
 static const unsigned char PROGMEM smiley_sad_buf[] = {
 	0b00000000, 0b00000000, 0b00000000, 0b00000000,
 	0b00000000, 0b00000000, 0b00000000, 0b00000000,
@@ -101,3 +113,9 @@ static const unsigned char PROGMEM smiley_sad_buf[] = {
 	0b00000000, 0b00000000, 0b00000000, 0b00000000,
 	0b00000000, 0b00000000, 0b00000000, 0b00000000,
 	0b00000000, 0b00000000, 0b00000000, 0b00000000 };
+
+static struct Sprite smiley_sad = {
+	.h = 32,
+	.w = 32,
+	.buf = smiley_sad_buf
+};

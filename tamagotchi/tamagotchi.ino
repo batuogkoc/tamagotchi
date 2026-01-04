@@ -63,7 +63,7 @@ volatile SemaphoreHandle_t button_0_semaphore;
 volatile SemaphoreHandle_t button_1_semaphore;
 volatile SemaphoreHandle_t button_2_semaphore;
 
-unsigned char* smiley_buf = (unsigned char*)smiley_happy_buf;
+struct Sprite* smiley_sprite = &smiley_happy;
 
 void IRAM_ATTR debounce_timer_isr(){
   static long button_0_integrated = 0;
@@ -240,20 +240,20 @@ void loop() {
   if(happiness > 0){
     
     if(happiness>0.7){
-      smiley_buf = (unsigned char*)smiley_happy_buf;
+      smiley_sprite = &smiley_happy;
     }
     else if(0.3<happiness && happiness<=0.7){
-      smiley_buf = (unsigned char*)smiley_neutral_buf;
+      smiley_sprite = &smiley_neutral;
     }
     else{
-      smiley_buf = (unsigned char*)smiley_sad_buf;
+      smiley_sprite = &smiley_sad;
     }
   }
 
   
   if(menu_state == 0){
     display.clearDisplay();
-    display.drawBitmap((int)(48+x_offset), (int)(16+y_offset), smiley_buf, SMILEY_COLS, SMILEY_ROWS, SH110X_WHITE);
+    display.drawBitmap((int)(48+x_offset), (int)(16+y_offset), smiley_sprite->buf, smiley_sprite->h, smiley_sprite->w, SH110X_WHITE);
     
     display.display();
   }
