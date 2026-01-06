@@ -1,6 +1,6 @@
 /*********************************************************************
   This is an example for our Monochrome OLEDs based on SH110X drivers
-
+c:\Batu\Projects\tamagotchi\tamagotchi\sprites\particles.h
   This example is for a 128x64 size display using I2C to communicate
   3 pins are required to interface (2 I2C and one reset)
 
@@ -22,6 +22,11 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
 #include "sprites/smiley.h"
+#include "sprites/particles.h"
+
+#include "sprite.h"
+#include "particle.h"
+
 
 /* Uncomment the initialize the I2C address , uncomment only one, If you get a totally blank screen try the other*/
 #define i2c_Address 0x3c //initialize with the I2C addr 0x3C Typically eBay OLED's
@@ -36,6 +41,8 @@
 #define BUTTON_1 13
 #define BUTTON_2 26
 
+#define MAX_PARTICLE_NUM 20
+
 #define DEBOUNCE_COUNTER_MAX 10
 Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 hw_timer_t *debounce_timer = NULL;
@@ -49,10 +56,16 @@ int y_borders = 16;
 
 float deltaT = 0;
 
-int animation_state = 0; 
+enum AnimationState {idle, wandering, beingInteractedWith, beingFed};
+enum AnimationState animation_state = idle; 
 long animation_end_time = 0;
 
-int menu_state = 0;
+enum MenuState {mainMenu, statsMenu}; 
+enum MenuState menu_state = mainMenu;
+
+enum SmileyState {happy, neutral, sad, hungry, dead};
+enum SmileyState smiley_state = happy;
+
 long menu_reversion_time = 0;
 
 float happiness=1;
@@ -63,11 +76,13 @@ volatile SemaphoreHandle_t button_0_semaphore;
 volatile SemaphoreHandle_t button_1_semaphore;
 volatile SemaphoreHandle_t button_2_semaphore;
 
-struct Sprite* smiley_sprite = &smiley_happy;
+Sprite* smiley_sprite = &smiley_happy_sprite;
+
+Particle particles[MAX_PARTICLE_NUM];
 
 void IRAM_ATTR debounce_timer_isr(){
-  static long button_0_integrated = 0;
-  static bool button_0_debounced = 0;
+  static long button_0_integrated = DEBOUNCE_COUNTER_MAX;
+  static bool button_0_debounced = true;
   if(digitalRead(BUTTON_0)){
     if(button_0_integrated<DEBOUNCE_COUNTER_MAX)
       button_0_integrated++;
@@ -86,8 +101,8 @@ void IRAM_ATTR debounce_timer_isr(){
     button_0_debounced = false;
   }
 
-  static long button_1_integrated = 0;
-  static bool button_1_debounced = 0;
+  static long button_1_integrated = DEBOUNCE_COUNTER_MAX;
+  static bool button_1_debounced = true;
   if(digitalRead(BUTTON_1)){
     if(button_1_integrated<DEBOUNCE_COUNTER_MAX)
       button_1_integrated++;
@@ -106,8 +121,8 @@ void IRAM_ATTR debounce_timer_isr(){
     button_1_debounced = false;
   }
 
-  static long button_2_integrated = 0;
-  static bool button_2_debounced = 0;
+  static long button_2_integrated = DEBOUNCE_COUNTER_MAX;
+  static bool button_2_debounced = true;
   if(digitalRead(BUTTON_2)){
     if(button_2_integrated<DEBOUNCE_COUNTER_MAX)
       button_2_integrated++;
@@ -143,8 +158,22 @@ void increase_hunger(float d_hunger){
     hunger = 0;
 }
 
-void setup()   {
+bool spawn_particle(uint64_t expiry_time, float pos_x, float pos_y, float vel_x, float vel_y, Sprite* sprite){
+  for(int i=0; i<MAX_PARTICLE_NUM; i++){
+    if(particles[i].expiry_time<millis()){
+      particles[i].expiry_time = expiry_time;
+      particles[i].pos_x = pos_x;
+      particles[i].pos_y = pos_y;
+      particles[i].vel_x = vel_x;
+      particles[i].vel_y = vel_y;
+      particles[i].sprite = sprite;
+      return true;
+    }
+  }
+  return false;
+}
 
+void setup()   {
   Serial.begin(9600);
   pinMode(BUTTON_0, INPUT_PULLUP);
   pinMode(BUTTON_1, INPUT_PULLUP);
@@ -178,53 +207,132 @@ void loop() {
   long start_micros = micros();
 
   increase_happiness(-0.06*deltaT);
-  increase_hunger(-0.01*deltaT);
+  increase_hunger(-0.03*deltaT);
+
+  if(happiness>0.7){
+    smiley_state = happy;
+  }
+  else if(0.3<happiness && happiness<=0.7){
+    smiley_state = neutral;
+  }
+  else{
+    smiley_state = sad;
+  }
+
+  if(hunger<0.2){
+    smiley_state = hungry;
+  }
+  if (hunger<0.001){
+    smiley_state = dead;
+  }
 
   if(xSemaphoreTake(button_1_semaphore, 0)){
-    increase_happiness(0.2);
+    if(smiley_state != hungry && smiley_state != dead){
+      increase_happiness(0.2);
+      for(int i = 0; i<random(3,5); i++){
+        spawn_particle(millis() + random(1000, 3000), 48+x_offset+random(0, 32), 16+y_offset+random(0, 32), 0, -((float)random(300, 700))/100.0f , &heart_sprite);
+      }
+    }
+
   }
   if(xSemaphoreTake(button_2_semaphore, 0)){
-    increase_hunger(0.2);
+    if(smiley_state != dead){
+          increase_hunger(0.2);
+      for(int i = 0; i<random(3,5); i++){
+        spawn_particle(millis() + random(5000, 15000), 48+x_offset+random(0, 32), 40+y_offset+random(0, 8), 0, 0, &crumbs_sprite);
+      }
+    }
   }
 
   //menu state transitions
-  if(menu_state == 0){
+  if(menu_state == mainMenu){
     if(xSemaphoreTake(button_0_semaphore, 0)){
-      menu_state = 1;
+      menu_state = statsMenu;
       menu_reversion_time = millis() + 5000;
     }
   }
-  else if(menu_state == 1){
+  else if(menu_state == statsMenu){
     if(xSemaphoreTake(button_0_semaphore, 0)){
-      menu_state = 0;
+      menu_state = mainMenu;
     }
     if(millis()>menu_reversion_time){
-      menu_state = 0;
+      menu_state = mainMenu;
     }
   }
 
   //animation state transition
-  if(animation_state == 0){
+  if(animation_state == idle){
     if(animation_end_time < millis()){
-      animation_state = 1;
-      animation_end_time = random(1000, 3000) + millis();
-      x_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(3, 5));
-      y_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(1, 3));
+
+      switch (smiley_state) {
+        case happy:
+        case neutral:
+        default:
+          animation_state = wandering;
+          animation_end_time = random(1000, 3000) + millis();
+          x_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(3, 5));
+          y_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(1, 3));
+        break;
+
+        case sad:
+          animation_state = wandering;
+          animation_end_time = random(3000, 5000) + millis();
+          x_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(10, 20)/10.0f);
+          y_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(5, 10)/10.0f);
+        break
+        case hungry:
+          animation_state = wandering;
+          animation_end_time = random(3000, 5000) + millis();
+          x_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(10, 20)/10.0f);
+          y_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(5, 10)/10.0f);
+        break;
+
+        case dead:
+          //do nothing as you are dead
+        break;
+
+      }
+      
     }
   }
-  else if(animation_state == 1){
+  else if(animation_state == wandering){
     if(animation_end_time < millis()){
-      animation_state = 0;
-      animation_end_time = random(1000, 3000) + millis();
-      x_speed = 0;
+        x_speed = 0;
+        y_speed = 0;
+        case happy:
+        case neutral:
+        default:
+          animation_end_time = random(1000, 3000) + millis();
+          animation_state = idle;
+        break;
+
+        case sad:
+        case hungry:
+          animation_end_time = random(1000, 3000) + millis();
+          animation_state = idle;
+        break;
+
+        case dead:
+          //do nothing as you are dead
+        break;
+      
+
     }
   }
+
+  for(int i = 0; i<MAX_PARTICLE_NUM; i++){
+    if(particles[i].expiry_time>millis()){
+      particles[i].pos_x += particles[i].vel_x * deltaT;
+      particles[i].pos_y += particles[i].vel_y * deltaT;
+    }
+  }
+  
 
   //logic inside of the state
-  if(animation_state == 0){
+  if(animation_state == idle){
 
   }
-  else if(animation_state == 1){
+  else if(animation_state == wandering){
     if(abs(x_offset)>=x_borders){
       x_speed*=-1;
     }
@@ -236,28 +344,44 @@ void loop() {
     y_offset += y_speed*deltaT;
   }
 
+  switch (smiley_state)
+  {
+	case happy:
+		smiley_sprite = &smiley_happy_sprite;
+		break;
+	case neutral:
+		smiley_sprite = &smiley_neutral_sprite;
+		break;
+	case sad:
+		smiley_sprite = &smiley_sad_sprite;
+		break;
+	case hungry:
+		smiley_sprite = &smiley_hungry_sprite;
+		break;
+	case dead:
+		smiley_sprite = &smiley_dead_sprite;
+		break;
 
-  if(happiness > 0){
-    
-    if(happiness>0.7){
-      smiley_sprite = &smiley_happy;
-    }
-    else if(0.3<happiness && happiness<=0.7){
-      smiley_sprite = &smiley_neutral;
-    }
-    else{
-      smiley_sprite = &smiley_sad;
-    }
+  default:
+    smiley_sprite = &smiley_neutral_sprite;
+    break;
   }
 
   
-  if(menu_state == 0){
+  if(menu_state == mainMenu){
     display.clearDisplay();
-    display.drawBitmap((int)(48+x_offset), (int)(16+y_offset), smiley_sprite->buf, smiley_sprite->h, smiley_sprite->w, SH110X_WHITE);
+    display.drawBitmap((int)(48+x_offset), (int)(16+y_offset), smiley_sprite->buf, smiley_sprite->w, smiley_sprite->h, SH110X_WHITE);
     
+    
+    for(int i = 0; i<MAX_PARTICLE_NUM; i++){
+      if(particles[i].expiry_time>millis() && particles[i].sprite != NULL){
+        display.drawBitmap((int)particles[i].pos_x, (int)particles[i].pos_y, particles[i].sprite->buf, particles[i].sprite->w, particles[i].sprite->h, SH110X_WHITE);
+      }
+    }
+
     display.display();
   }
-  else if(menu_state == 1){
+  else if(menu_state == statsMenu){
     display.clearDisplay();
 
     display.setTextSize(1);
