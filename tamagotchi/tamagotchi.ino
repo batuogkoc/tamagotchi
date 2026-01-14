@@ -51,6 +51,13 @@ c:\Batu\Projects\tamagotchi\tamagotchi\sprites\particles.h
 #define HUNGER_SECS_TILL_0 172800 //60*60*24*2
 #define HAPPINESS_SECS_TILL_0 21600 //60*60*6
 
+#define uS_TO_S_FACTOR 1000000ULL  // Conversion factor for micro seconds to seconds
+#define TIME_TO_SLEEP  5    
+
+#define LOW_BATT_WARNING_VOLTAGE 3.3
+#define SHUTDOWN_VOLTAGE 3
+#define TURN_ON_VOLTAGE 3.3
+
 // #define STATE_SAVE_INTERVAL 3000
 // #define HUNGER_SECS_TILL_0 20
 // #define HAPPINESS_SECS_TILL_0 10
@@ -80,10 +87,8 @@ int64_t menu_reversion_time = 0;
 
 int64_t prev_state_save_time = 0;
 
-double happiness=1;
-double hunger=1;
-
-float batt_level=4095;
+RTC_DATA_ATTR double happiness=1;
+RTC_DATA_ATTR double hunger=1;
 
 
 volatile SemaphoreHandle_t button_0_semaphore;
@@ -158,6 +163,14 @@ void IRAM_ATTR debounce_timer_isr(){
   }
 }
 
+void turn_off_display(Adafruit_SH1106G* display){
+  display->oled_command(0xAE);
+}
+
+void turn_on_display(Adafruit_SH1106G* display){
+  display->oled_command(0xAF);
+}
+
 int64_t millis_r(){
   return esp_timer_get_time()/1000;
 }
@@ -193,7 +206,26 @@ bool spawn_particle(uint64_t expiry_time, float pos_x, float pos_y, float vel_x,
   return false;
 }
 
+float read_battery_voltage(int num_measurements=16){
+  float ret=0;
+  for(int i=0; i<num_measurements; i++){
+    ret += analogReadMilliVolts(BATT_VOLTAGE_PIN)*2;
+  }
+
+  return ret/num_measurements/1000;
+}
+
+void shutdown_system(Adafruit_SH1106G* display){
+  turn_off_display(display);
+  esp_deep_sleep_start();
+}
+
 void setup()   {
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+  display.begin(i2c_Address, true); // Address 0x3C default
+  if(read_battery_voltage()<TURN_ON_VOLTAGE){
+    shutdown_system(&display);
+  }
   prefs.begin("prefs", false);
 
   if(!prefs.isKey("hunger")){
@@ -218,7 +250,7 @@ void setup()   {
 
 
   delay(250); // wait for the OLED to power up
-  display.begin(i2c_Address, true); // Address 0x3C default
+  turn_on_display(&display);
  //display.setContrast (0); // dim display
   display.clearDisplay();
   display.display();
@@ -230,10 +262,11 @@ void setup()   {
   
 }
 
+
 void loop() {
   
   int64_t start_micros = esp_timer_get_time();
-  batt_level = batt_level*0.90 + analogRead(BATT_VOLTAGE_PIN)*0.10;
+
   increase_happiness(-deltaT/HAPPINESS_SECS_TILL_0);
   increase_hunger(-deltaT/HUNGER_SECS_TILL_0);
 
@@ -452,9 +485,16 @@ void loop() {
       display.setCursor(20, 24);
       display.print("Restart?");
     }
+
+
+
     //analogRead(BATT_VOLTAGE_PIN)<3000
-    if(batt_level<2300){
+    float batt_voltage = read_battery_voltage(); 
+    if(batt_voltage<LOW_BATT_WARNING_VOLTAGE){
       display.drawBitmap(111, 4, battery_sprite.buf, battery_sprite.w, battery_sprite.h, SH110X_WHITE);
+    }
+    if(batt_voltage<SHUTDOWN_VOLTAGE){
+      shutdown_system(&display);
     }
 
     display.display();
@@ -476,8 +516,6 @@ void loop() {
 
     display.display();
   }
-
-
   
   deltaT = ((double)(esp_timer_get_time()-start_micros))/1000000.0;
   //25 hz loop
