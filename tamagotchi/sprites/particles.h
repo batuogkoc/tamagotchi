@@ -31,11 +31,9 @@ static Sprite heart_sprite = {
 
 static const unsigned char PROGMEM crumbs_buf[] = {
 	0b10000000,
-	0b00000000,
-	0b00000000,
 };
 static Sprite crumbs_sprite = {
-	.h = 3,
+	.h = 1,
 	.w = 8,
 	.buf = crumbs_buf
 };

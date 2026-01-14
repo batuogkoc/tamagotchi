@@ -23,10 +23,9 @@ c:\Batu\Projects\tamagotchi\tamagotchi\sprites\particles.h
 #include <Adafruit_SH110X.h>
 #include "sprites/smiley.h"
 #include "sprites/particles.h"
-
 #include "sprite.h"
 #include "particle.h"
-
+#include <Preferences.h>
 
 /* Uncomment the initialize the I2C address , uncomment only one, If you get a totally blank screen try the other*/
 #define i2c_Address 0x3c //initialize with the I2C addr 0x3C Typically eBay OLED's
@@ -37,13 +36,24 @@ c:\Batu\Projects\tamagotchi\tamagotchi\sprites\particles.h
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 #define OLED_RESET -1   //   QT-PY / XIAO
 
-#define BUTTON_0 12
-#define BUTTON_1 13
-#define BUTTON_2 26
+#define BUTTON_0 4
+#define BUTTON_1 3
+#define BUTTON_2 5
+#define BATT_VOLTAGE_PIN 2
 
-#define MAX_PARTICLE_NUM 20
+#define MAX_PARTICLE_NUM 50
 
 #define DEBOUNCE_COUNTER_MAX 10
+
+#define SAD_SPEED_MODIFIER 0.6
+#define HUNGRY_SPEED_MODIFIER 0.3
+#define STATE_SAVE_INTERVAL 600000
+#define HUNGER_SECS_TILL_0 172800 //60*60*24*2
+#define HAPPINESS_SECS_TILL_0 21600 //60*60*6
+
+// #define STATE_SAVE_INTERVAL 3000
+// #define HUNGER_SECS_TILL_0 20
+// #define HAPPINESS_SECS_TILL_0 10
 Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 hw_timer_t *debounce_timer = NULL;
 
@@ -51,25 +61,29 @@ float x_offset = 0;
 float y_offset = 0;
 float x_speed = 0;
 float y_speed = 0;
-int x_borders = 32;
-int y_borders = 16;
+int x_borders = 36;
+int y_borders = 18;
 
-float deltaT = 0;
+double deltaT = 0;
 
 enum AnimationState {idle, wandering, beingInteractedWith, beingFed};
 enum AnimationState animation_state = idle; 
-long animation_end_time = 0;
+int64_t animation_end_time = 0;
 
-enum MenuState {mainMenu, statsMenu}; 
+enum MenuState {mainMenu, statsMenu, restartMenu}; 
 enum MenuState menu_state = mainMenu;
 
 enum SmileyState {happy, neutral, sad, hungry, dead};
 enum SmileyState smiley_state = happy;
 
-long menu_reversion_time = 0;
+int64_t menu_reversion_time = 0;
 
-float happiness=1;
-float hunger=1;
+int64_t prev_state_save_time = 0;
+
+double happiness=1;
+double hunger=1;
+
+float batt_level=4095;
 
 
 volatile SemaphoreHandle_t button_0_semaphore;
@@ -79,6 +93,8 @@ volatile SemaphoreHandle_t button_2_semaphore;
 Sprite* smiley_sprite = &smiley_happy_sprite;
 
 Particle particles[MAX_PARTICLE_NUM];
+
+Preferences prefs;
 
 void IRAM_ATTR debounce_timer_isr(){
   static long button_0_integrated = DEBOUNCE_COUNTER_MAX;
@@ -142,7 +158,11 @@ void IRAM_ATTR debounce_timer_isr(){
   }
 }
 
-void increase_happiness(float d_happiness){
+int64_t millis_r(){
+  return esp_timer_get_time()/1000;
+}
+
+void increase_happiness(double d_happiness){
   happiness += d_happiness;
   if(happiness>1)
     happiness = 1;
@@ -150,7 +170,7 @@ void increase_happiness(float d_happiness){
     happiness = 0;
 }
 
-void increase_hunger(float d_hunger){
+void increase_hunger(double d_hunger){
   hunger += d_hunger;
   if(hunger>1)
     hunger = 1;
@@ -160,7 +180,7 @@ void increase_hunger(float d_hunger){
 
 bool spawn_particle(uint64_t expiry_time, float pos_x, float pos_y, float vel_x, float vel_y, Sprite* sprite){
   for(int i=0; i<MAX_PARTICLE_NUM; i++){
-    if(particles[i].expiry_time<millis()){
+    if(particles[i].expiry_time<millis_r()){
       particles[i].expiry_time = expiry_time;
       particles[i].pos_x = pos_x;
       particles[i].pos_y = pos_y;
@@ -174,6 +194,16 @@ bool spawn_particle(uint64_t expiry_time, float pos_x, float pos_y, float vel_x,
 }
 
 void setup()   {
+  prefs.begin("prefs", false);
+
+  if(!prefs.isKey("hunger")){
+    prefs.putDouble("hunger", 1);
+    prefs.putDouble("happiness", 1);
+  }
+
+  happiness = prefs.getDouble("happiness", 1);
+  hunger = prefs.getDouble("hunger", 1);
+
   Serial.begin(9600);
   pinMode(BUTTON_0, INPUT_PULLUP);
   pinMode(BUTTON_1, INPUT_PULLUP);
@@ -187,27 +217,25 @@ void setup()   {
   button_2_semaphore = xSemaphoreCreateBinary();
 
 
-  // Show image buffer on the display hardware.
-  // Since the buffer is intialized with an Adafruit splashscreen
-  // internally, this will display the splashscreen.
-
   delay(250); // wait for the OLED to power up
   display.begin(i2c_Address, true); // Address 0x3C default
  //display.setContrast (0); // dim display
   display.clearDisplay();
   display.display();
-  delay(2000);
-  randomSeed(42);
+  x_offset = random(2, 2*x_borders-2)-x_borders;
+  y_offset = random(2, 2*y_borders-2)-y_borders;
+  // randomSeed(42);
 
   // Clear the buffer.
   
 }
 
 void loop() {
-  long start_micros = micros();
-
-  increase_happiness(-0.06*deltaT);
-  increase_hunger(-0.03*deltaT);
+  
+  int64_t start_micros = esp_timer_get_time();
+  batt_level = batt_level*0.90 + analogRead(BATT_VOLTAGE_PIN)*0.10;
+  increase_happiness(-deltaT/HAPPINESS_SECS_TILL_0);
+  increase_hunger(-deltaT/HUNGER_SECS_TILL_0);
 
   if(happiness>0.7){
     smiley_state = happy;
@@ -226,102 +254,119 @@ void loop() {
     smiley_state = dead;
   }
 
-  if(xSemaphoreTake(button_1_semaphore, 0)){
-    if(smiley_state != hungry && smiley_state != dead){
-      increase_happiness(0.2);
-      for(int i = 0; i<random(3,5); i++){
-        spawn_particle(millis() + random(1000, 3000), 48+x_offset+random(0, 32), 16+y_offset+random(0, 32), 0, -((float)random(300, 700))/100.0f , &heart_sprite);
-      }
-    }
 
-  }
-  if(xSemaphoreTake(button_2_semaphore, 0)){
-    if(smiley_state != dead){
-          increase_hunger(0.2);
-      for(int i = 0; i<random(3,5); i++){
-        spawn_particle(millis() + random(5000, 15000), 48+x_offset+random(0, 32), 40+y_offset+random(0, 8), 0, 0, &crumbs_sprite);
-      }
-    }
-  }
 
   //menu state transitions
   if(menu_state == mainMenu){
     if(xSemaphoreTake(button_0_semaphore, 0)){
-      menu_state = statsMenu;
-      menu_reversion_time = millis() + 5000;
+      if(smiley_state == dead){
+        menu_state = restartMenu;
+        menu_reversion_time = millis_r() + 5000;
+      }
+      else{
+        menu_state = statsMenu;
+        menu_reversion_time = millis_r() + 5000;
+      }
     }
   }
   else if(menu_state == statsMenu){
     if(xSemaphoreTake(button_0_semaphore, 0)){
       menu_state = mainMenu;
     }
-    if(millis()>menu_reversion_time){
+    if(millis_r()>menu_reversion_time){
       menu_state = mainMenu;
+    }
+  }
+  else if(menu_state = restartMenu){
+    if(millis_r()>menu_reversion_time){
+      menu_state = mainMenu;
+    }
+    if(xSemaphoreTake(button_0_semaphore, 0)){
+      prefs.remove("hunger");
+      prefs.remove("happiness");
+      abort();
+    }
+  }
+
+  if(xSemaphoreTake(button_1_semaphore, 0)){
+    if(smiley_state != hungry && smiley_state != dead){
+      increase_happiness(0.2);
+      for(int i = 0; i<random(3,5); i++){
+        spawn_particle(millis_r() + random(1000, 3000), 48+x_offset+random(0, 32), 16+y_offset+random(0, 32), 0, -((float)random(300, 700))/100.0f , &heart_sprite);
+      }
+    }
+
+  }
+  if(xSemaphoreTake(button_2_semaphore, 0)){
+    if(smiley_state != dead){
+      increase_hunger(0.2);
+      for(int i = 0; i<random(3,5); i++){
+        spawn_particle(millis_r() + random(5000, 15000), 48+x_offset+random(0, 32), 40+y_offset+random(0, 8), 0, 0, &crumbs_sprite);
+      }
     }
   }
 
   //animation state transition
   if(animation_state == idle){
-    if(animation_end_time < millis()){
+    if(animation_end_time < millis_r()){
+      animation_state = wandering;
+      int64_t animation_time = random(1000, 3000);
+      x_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(3, 5));
+      y_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(1, 3));
 
       switch (smiley_state) {
         case happy:
         case neutral:
         default:
-          animation_state = wandering;
-          animation_end_time = random(1000, 3000) + millis();
-          x_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(3, 5));
-          y_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(1, 3));
+          //go at default speed
         break;
 
         case sad:
-          animation_state = wandering;
-          animation_end_time = random(3000, 5000) + millis();
-          x_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(10, 20)/10.0f);
-          y_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(5, 10)/10.0f);
-        break
+          animation_time *= (1/SAD_SPEED_MODIFIER);
+          x_speed *= SAD_SPEED_MODIFIER;
+          y_speed *= SAD_SPEED_MODIFIER;
+        break;
         case hungry:
-          animation_state = wandering;
-          animation_end_time = random(3000, 5000) + millis();
-          x_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(10, 20)/10.0f);
-          y_speed = (((float)random(0,2))*2.0f-1.0f)*((float)random(5, 10)/10.0f);
+          animation_time *= (1/HUNGRY_SPEED_MODIFIER);
+          x_speed *= HUNGRY_SPEED_MODIFIER;
+          y_speed *= HUNGRY_SPEED_MODIFIER;
         break;
 
         case dead:
-          //do nothing as you are dead
+          x_speed = 0;
+          y_speed = 0;
         break;
 
       }
+
+      animation_end_time = animation_time + millis_r();
       
     }
   }
   else if(animation_state == wandering){
-    if(animation_end_time < millis()){
+    if(animation_end_time < millis_r()){
         x_speed = 0;
         y_speed = 0;
-        case happy:
-        case neutral:
-        default:
-          animation_end_time = random(1000, 3000) + millis();
-          animation_state = idle;
-        break;
+        int64_t animation_time = random(1000, 3000);
+        animation_state = idle;
 
-        case sad:
-        case hungry:
-          animation_end_time = random(1000, 3000) + millis();
-          animation_state = idle;
-        break;
-
-        case dead:
-          //do nothing as you are dead
-        break;
-      
-
+        switch(smiley_state){
+          case sad:
+            animation_time *= (1/SAD_SPEED_MODIFIER);
+          break;
+          case hungry:
+            animation_time *= (1/HUNGRY_SPEED_MODIFIER);
+          break;
+          default:
+            
+          break;
+        }
+        animation_end_time = animation_time + millis_r();
     }
   }
 
   for(int i = 0; i<MAX_PARTICLE_NUM; i++){
-    if(particles[i].expiry_time>millis()){
+    if(particles[i].expiry_time>millis_r()){
       particles[i].pos_x += particles[i].vel_x * deltaT;
       particles[i].pos_y += particles[i].vel_y * deltaT;
     }
@@ -333,13 +378,23 @@ void loop() {
 
   }
   else if(animation_state == wandering){
-    if(abs(x_offset)>=x_borders){
-      x_speed*=-1;
+    if(x_offset>=x_borders){
+      x_speed=-1*abs(x_speed);
+      x_offset = x_borders-0.01;
+    }
+    if(x_offset<=-x_borders){
+      x_speed=abs(x_speed);
+      x_offset = -x_borders+0.01;
     }
     x_offset += x_speed*deltaT;
 
-    if(abs(y_offset)>=y_borders){
-      y_speed*=-1;
+    if(y_offset>=y_borders){
+      y_speed=-1*abs(y_speed);
+      y_offset = y_borders-0.01;
+    }
+    if(y_offset<=-y_borders){
+      y_speed=abs(y_speed);
+      y_offset = -y_borders+0.01;
     }
     y_offset += y_speed*deltaT;
   }
@@ -367,16 +422,39 @@ void loop() {
     break;
   }
 
+  if(millis_r()-prev_state_save_time>STATE_SAVE_INTERVAL){
+    prev_state_save_time = millis_r(); 
+
+    prefs.putDouble("hunger", hunger);
+    prefs.putDouble("happiness", happiness);
+
+    Serial.println("hunger and happiness");
+    Serial.print(prefs.getDouble("hunger"));
+    Serial.print(" ");
+    Serial.println(prefs.getDouble("happiness"));
+  }
+
   
-  if(menu_state == mainMenu){
+  if(menu_state == mainMenu || menu_state == restartMenu){
     display.clearDisplay();
     display.drawBitmap((int)(48+x_offset), (int)(16+y_offset), smiley_sprite->buf, smiley_sprite->w, smiley_sprite->h, SH110X_WHITE);
     
     
     for(int i = 0; i<MAX_PARTICLE_NUM; i++){
-      if(particles[i].expiry_time>millis() && particles[i].sprite != NULL){
+      if(particles[i].expiry_time>millis_r() && particles[i].sprite != NULL){
         display.drawBitmap((int)particles[i].pos_x, (int)particles[i].pos_y, particles[i].sprite->buf, particles[i].sprite->w, particles[i].sprite->h, SH110X_WHITE);
       }
+    }
+
+    if(menu_state == restartMenu){
+      display.setTextSize(2);
+      display.setTextColor(SH110X_WHITE);
+      display.setCursor(20, 24);
+      display.print("Restart?");
+    }
+    //analogRead(BATT_VOLTAGE_PIN)<3000
+    if(batt_level<2300){
+      display.drawBitmap(111, 4, battery_sprite.buf, battery_sprite.w, battery_sprite.h, SH110X_WHITE);
     }
 
     display.display();
@@ -401,7 +479,7 @@ void loop() {
 
 
   
-  deltaT = ((float)(micros()-start_micros))/1000000.0f;
+  deltaT = ((double)(esp_timer_get_time()-start_micros))/1000000.0;
   //25 hz loop
   while(deltaT<0.004){;}
 }
